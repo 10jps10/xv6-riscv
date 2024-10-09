@@ -5,6 +5,7 @@
 #include "memlayout.h"
 #include "spinlock.h"
 #include "proc.h"
+#include "pstat.h"
 
 uint64
 sys_exit(void)
@@ -98,7 +99,24 @@ sys_settickets(void)
 {
   int tickets;
   argint(0, &tickets);
+  if(tickets<0)
+    return -1;
   myproc()->tickets=tickets;
   return 0;
 }
 
+uint64
+sys_getpinfo(void)
+{
+  struct pstat pst;       // blank pstat copy in kernel mem.
+  uint64 dst_pst;         // address to pstat in user mem.
+  // Load user address to their pstat structure
+  argaddr(0, &dst_pst);
+  // Check if user address is invalid 
+  if (dst_pst <= 0 || dst_pst > myproc()->sz)
+    return -1;
+  // Fill pstat copy in kernel
+  fillpstat(&pst);
+  // Copy kernel instance of pstat to user instance of pstat and return 0 if it was sucessful or -1 otherwise.
+  return copyout(myproc()->pagetable, dst_pst, (char *) &pst, sizeof(struct pstat));
+}

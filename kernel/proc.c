@@ -5,10 +5,13 @@
 #include "spinlock.h"
 #include "proc.h"
 #include "defs.h"
+#include "pstat.h"
 
 struct cpu cpus[NCPU];
 
 struct proc proc[NPROC];
+
+const uint64 INITIALTICKETS = 1;
 
 struct proc *initproc;
 
@@ -251,6 +254,9 @@ userinit(void)
 
   p->state = RUNNABLE;
 
+  // Set default initial amount of tickets to proc.
+  p->tickets = INITIALTICKETS;
+
   release(&p->lock);
 }
 
@@ -321,6 +327,9 @@ fork(void)
   acquire(&np->lock);
   np->state = RUNNABLE;
   release(&np->lock);
+
+  // Copy tickets from parent
+  np->tickets = p->tickets;
 
   return pid;
 }
@@ -434,6 +443,16 @@ wait(uint64 addr)
   }
 }
 
+// MY (MINE. DONE BY ME) pseudo-random number generator
+uint64 lfsr = 0xACE1u;
+uint64 
+random(uint64 max) 
+{
+  uint64 bit = ((lfsr >> 0) ^ (lfsr >> 2) ^ (lfsr >> 3) ^ (lfsr >> 5) ) & 1;
+  lfsr = (lfsr >> 1) | (bit << 15);
+  return (lfsr % max);
+}
+
 // Per-CPU process scheduler.
 // Each CPU calls scheduler() after setting itself up.
 // Scheduler never returns.  It loops, doing:
@@ -454,10 +473,25 @@ scheduler(void)
     // processes are waiting.
     intr_on();
 
+    uint64 total_tickets = 0;
+    for(p = proc; p < &proc[NPROC]; p++) {
+      if (p->state == RUNNABLE)
+        total_tickets += p->tickets;
+    }
+    uint64 winning_ticket = random(total_tickets);
+
     int found = 0;
+    uint64 ticket_counter = 0;
     for(p = proc; p < &proc[NPROC]; p++) {
       acquire(&p->lock);
       if(p->state == RUNNABLE) {
+        // Accumulate tickets
+        ticket_counter += p->tickets;
+        // If current proc is not the winner, continue.
+        if (ticket_counter <= winning_ticket) {
+          release(&p->lock);
+          continue;
+        }
         // Switch to chosen process.  It is the process's job
         // to release its lock and then reacquire it
         // before jumping back to us.
@@ -469,8 +503,13 @@ scheduler(void)
         // It should have changed its p->state before coming back.
         c->proc = 0;
         found = 1;
+        // Increase amount of process ticks after it has completed a quantum
+        p->ticks++;
       }
       release(&p->lock);
+      // If it is time to schedule a new proc, redo lotery
+      if (found == 1)
+        break;
     }
     if(found == 0) {
       // nothing to run; stop running on this core until an interrupt.
@@ -691,5 +730,17 @@ procdump(void)
       state = "???";
     printf("%d %s %s", p->pid, state, p->name);
     printf("\n");
+  }
+}
+
+void
+fillpstat(struct pstat * pst)
+{
+  for (uint64 i = 0; i < NPROC; i++)
+  {
+    pst->inuse[i] = (proc[i].state != UNUSED);
+    pst->tickets[i] = proc[i].tickets;
+    pst->pid[i] = proc[i].pid;
+    pst->ticks[i] = proc[i].ticks;
   }
 }
