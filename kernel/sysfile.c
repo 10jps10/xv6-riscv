@@ -503,3 +503,58 @@ sys_pipe(void)
   }
   return 0;
 }
+
+uint64
+sys_mmap(void)
+{ 
+  uint64 addr;
+  int length, offset, prot, flags, fd;
+  struct file * f;
+
+  argaddr(0, &addr);
+  if (addr < 0)
+    return -1;  //Negative addresses are not valid.
+
+  argint(1, &length);
+  if (length < 0)
+    return -1;  //Cannot map a negative amount of bytes.
+
+  argint(2, &prot);
+  if ((prot < 0) || (prot > (PROT_READ | PROT_WRITE)))
+    return -1;  //Undefined protection argument.
+
+  argint(3, &flags);
+  if ((flags != MAP_PRIVATE) && (flags != MAP_SHARED))
+    return -1;  //Undefined flags.
+
+  if (argfd(4, &fd, &f) < 0)
+    return -1;
+
+  argint(5, &offset);
+  if (offset < 0)
+    return -1;
+
+  // If map is shared and and file is readonly, we cannot write.
+  // If map is private changes will not be carried to file so there is no need to check.
+  if (flags == MAP_SHARED)
+  {
+    if ((prot & PROT_WRITE) && !(f->writable))
+      return -1;
+  }
+
+  return mmap(addr, offset, length, prot, flags, fd, f);
+}
+
+uint64
+sys_munmap(void)
+{
+  uint64 addr;
+  int length;
+  argaddr(0, &addr);
+  if (addr < 0)
+    return -1;
+  argint(1, &length);
+  if (length < 0)
+    return -1;
+  return munmap(addr, length);
+}

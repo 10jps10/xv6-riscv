@@ -1,3 +1,5 @@
+#include "vma.h"
+
 // Saved registers for kernel context switches.
 struct context {
   uint64 ra;
@@ -106,4 +108,5 @@ struct proc {
   char name[16];               // Process name (debugging)
   uint64 tickets;	             // Process tickets
   uint64 ticks;                // Process ticks (cpu quantums granted to proc by scheduler)
+  struct vma vma_list;         // Process Virtual Memory Areas
 };

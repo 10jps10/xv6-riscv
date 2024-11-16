@@ -1,3 +1,6 @@
+#ifndef _FS_H_
+#define _FS_H_
+
 // On-disk file system format.
 // Both the kernel and user programs use this header file.
 
@@ -58,3 +61,5 @@ struct dirent {
   char name[DIRSIZ];
 };
 
+
+#endif //_FS_H_

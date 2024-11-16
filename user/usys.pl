@@ -38,3 +38,5 @@ entry("sleep");
 entry("uptime");
 entry("settickets");
 entry("getpinfo");
+entry("mmap");
+entry("munmap");

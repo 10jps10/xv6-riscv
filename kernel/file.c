@@ -180,3 +180,82 @@ filewrite(struct file *f, uint64 addr, int n)
   return ret;
 }
 
+uint64
+mmap(uint64 addr, int offset, int length, int prot, int flags, int fd, struct file * f)
+{
+  struct proc * p = myproc();
+  // Find a free entry in process vma list
+  int index = vma_find_free_entry(& (p->vma_list));
+  if (index < 0)
+    return -1; // There are no free vma entries left
+
+  if (addr == 0)
+  {
+    //Undefined virtual address. Kernel will decide.
+    addr = vma_get_new_addr(&(p->vma_list), length);
+  }
+  // Fill vma entry
+  if (vma_fill(& (p->vma_list), index, addr, offset, length, prot, flags, fd, f) < 0) {
+    return -1;  //VMA entry index was invalid . (This should never actually happen as it is already checked before)
+  }
+  //Increment ref count to file
+  filedup(f);
+  return addr;
+}
+
+int
+munmap(uint64 addr, int length)
+{
+  //addr must be page aligned (according to 'man munmap')
+  if ((addr % PGSIZE) != 0)
+    return -1;
+  //length may not be page aligned (according to 'man munmap')
+
+  struct proc * p = myproc();
+  // Find the vma entry associated to the VMA the address is pointing to
+  int index1 = vma_find(& (p->vma_list), addr);
+  if (index1 < 0)
+    return -1;  //This address is not pointing to a VMA
+  
+  //Check if we are freeing from the beginning of the VMA.
+  if (addr == p->vma_list.addr[index1])
+  {
+    int freed = vma_free_pages(& (p->vma_list), index1, addr, length, p->pagetable);
+    if (freed < 0)
+      return -1;
+    p->vma_list.addr[index1] += freed;
+    p->vma_list.offset[index1] += freed;
+    p->vma_list.length[index1] -= freed;
+  }
+  //Check if we are freeing to the end of the VMA
+  else if (PGROUNDUP(addr + length) == (p->vma_list.addr[index1] + p->vma_list.length[index1])) {
+    int freed = vma_free_pages(& (p->vma_list), index1, addr, length, p->pagetable);
+    if (freed < 0)
+      return -1;
+    p->vma_list.length[index1] -= freed;
+  }
+  //Else, we are freeing a region in the middle of the VMA
+  else {
+    //Our current VMA will be split into two, so we need another VMA entry
+    int index2 = vma_find_free_entry(& (p->vma_list));
+    if (index2 < 0)
+      return -1;
+    
+    //Get length of the first VMA
+    int length_vma1 = addr - p->vma_list.addr[index1];
+    //Free requested VMA pages
+    int freed = vma_free_pages(& (p->vma_list), index1, addr, length, p->pagetable);
+    //Get address, length and offset of the second VMA
+    uint64 addr_vma2 = addr + freed;
+    int length_vma2 = p->vma_list.length[index1] - freed - length_vma1;
+    int offset_vma2 = p->vma_list.offset[index1] + freed + length_vma1;
+
+    //Update the first VMA and fill the second VMA
+    p->vma_list.length[index1] = length_vma1;
+    vma_fill(& (p->vma_list), index2, addr_vma2, offset_vma2, length_vma2, p->vma_list.prot[index1], p->vma_list.flags[index1], p->vma_list.fd[index1], p->vma_list.file[index1]);
+    //Increment references to file as now we have two VMAs instead of one referencing the file
+    filedup(p->vma_list.file[index2]);
+  }
+
+  return 0;
+}

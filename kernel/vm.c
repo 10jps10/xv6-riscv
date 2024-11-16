@@ -187,7 +187,7 @@ uvmunmap(pagetable_t pagetable, uint64 va, uint64 npages, int do_free)
     if((pte = walk(pagetable, a, 0)) == 0)
       panic("uvmunmap: walk");
     if((*pte & PTE_V) == 0)
-      panic("uvmunmap: not mapped");
+      panic("uvmunmap: not mapped"); //Seguramente esto tendremos que cambiarlo por un continue cuando hagamos nuestra chapuza
     if(PTE_FLAGS(*pte) == PTE_V)
       panic("uvmunmap: not a leaf");
     if(do_free){
@@ -336,6 +336,42 @@ uvmcopy(pagetable_t old, pagetable_t new, uint64 sz)
 
  err:
   uvmunmap(new, 0, i / PGSIZE, 1);
+  return -1;
+}
+
+// Given a source page table, copy its memory from
+// initial_va to into a destination page table.
+// Copies both the page table and the
+// physical memory.
+// returns 0 on success, -1 on failure.
+// frees any allocated pages on failure.
+int
+uvmcopypages(pagetable_t src, pagetable_t dst, uint64 initial_va, uint64 length)
+{
+  pte_t *pte;
+  uint64 pa, i;
+  uint flags;
+  char *mem;
+
+  for(i = 0; i < PGROUNDUP(length); i += PGSIZE){
+    if((pte = walk(src, initial_va + i, 0)) == 0)
+      panic("uvmcopypages: pte should exist");
+    if((*pte & PTE_V) == 0)
+      continue; //panic("uvmcopypages: page not present");
+    pa = PTE2PA(*pte);
+    flags = PTE_FLAGS(*pte);
+    if((mem = kalloc()) == 0)
+      goto err;
+    memmove(mem, (char*)pa, PGSIZE);
+    if(mappages(dst, initial_va + i, PGSIZE, (uint64)mem, flags) != 0){
+      kfree(mem);
+      goto err;
+    }
+  }
+  return 0;
+
+ err:
+  uvmunmap(dst, initial_va, i / PGSIZE, 1);
   return -1;
 }
 

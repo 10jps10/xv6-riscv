@@ -1,3 +1,9 @@
+#ifndef _DEFS_H_
+#define _DEFS_H_
+
+#include "types.h"
+#include "riscv.h"
+
 struct buf;
 struct context;
 struct file;
@@ -9,6 +15,7 @@ struct sleeplock;
 struct stat;
 struct superblock;
 struct pstat;
+struct vma;
 
 // bio.c
 void            binit(void);
@@ -34,6 +41,8 @@ void            fileinit(void);
 int             fileread(struct file*, uint64, int n);
 int             filestat(struct file*, uint64 addr);
 int             filewrite(struct file*, uint64, int n);
+uint64          mmap(uint64 addr, int offset, int length, int prot, int flags, int fd, struct file * f);
+int             munmap(uint64 addr, int length);
 
 // fs.c
 void            fsinit(int);
@@ -109,6 +118,15 @@ int             either_copyin(void *dst, int user_src, uint64 src, uint64 len);
 void            procdump(void);
 void            fillpstat(struct pstat * pst);
 
+// vma.c
+void            vma_free(struct proc * p);
+int             vma_find(struct vma * vma_list, uint64 addr);
+int             vma_find_free_entry(struct vma * vma_list);
+int             vma_fill(struct vma * vma_list, int index, uint64 addr, int offset, int length, int prot, int flags, int fd, struct file * f);
+uint64          vma_get_new_addr(struct vma * vma_list, uint64 length);
+int             vma_free_pages(struct vma * vma_list, int index, uint64 page_addr, int length, pagetable_t pagetable);
+int             vma_copy(struct proc * src, struct proc * dst);
+
 // swtch.S
 void            swtch(struct context*, struct context*);
 
@@ -175,6 +193,7 @@ uint64          walkaddr(pagetable_t, uint64);
 int             copyout(pagetable_t, uint64, char *, uint64);
 int             copyin(pagetable_t, char *, uint64, uint64);
 int             copyinstr(pagetable_t, char *, uint64, uint64);
+int             uvmcopypages(pagetable_t src, pagetable_t dst, uint64 initial_va, uint64 length);
 
 // plic.c
 void            plicinit(void);
@@ -189,3 +208,5 @@ void            virtio_disk_intr(void);
 
 // number of elements in fixed-size array
 #define NELEM(x) (sizeof(x)/sizeof((x)[0]))
+
+#endif //_DEFS_H_

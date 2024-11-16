@@ -3,8 +3,12 @@
 #include "memlayout.h"
 #include "riscv.h"
 #include "spinlock.h"
+#include "fs.h"
+#include "sleeplock.h"
 #include "proc.h"
 #include "defs.h"
+#include "fcntl.h"
+#include "file.h"
 
 struct spinlock tickslock;
 uint ticks;
@@ -65,7 +69,63 @@ usertrap(void)
     intr_on();
 
     syscall();
-  } else if((which_dev = devintr()) != 0){
+  } 
+  else if ((r_scause() == 13) || (r_scause() == 15)) {
+    // 13 Load page fault || 15 Store/AMO page fault
+    uint64 fault_addr = r_stval();
+    // Check whether address is within process memory.
+    // Here we are assuming that everything below sz is already mapped.
+    // Therefore the checks that take place in vma_find will suffice.
+    if (fault_addr < 0) {
+      setkilled(p);
+      goto finished;
+    }
+
+    // Get vma index of the vma where the address is pointing into
+    int valid_vma = vma_find(&(p->vma_list), fault_addr);
+    if (valid_vma < 0) {
+      setkilled(p);
+      goto finished;
+    }
+
+    // If here because a write error, check if we have write permissions
+    int can_write = (p->vma_list.prot[valid_vma] & PROT_WRITE);
+    if ((r_scause() == 15) && !can_write)
+    {
+      // Attempting to write without permissions
+      setkilled(p);
+      goto finished;
+    }
+
+    //Get a new physical page
+    uint64 new_physical_addr = (uint64) kalloc();
+    if (new_physical_addr == 0)
+    {
+      // Unable to allocate new physical page
+      setkilled(p);
+      goto finished;
+    }
+    //Physical page might not be clean. Clear it.
+    memset((void *)new_physical_addr, 0, PGSIZE);
+
+    //Get virtual page address
+    uint64 fault_page_addr = PGROUNDDOWN(fault_addr);
+
+    //Map virtual page to physical page
+    int page_perms = PTE_U | PTE_R | (can_write ? PTE_W : 0); //NOTE: No need to set other flags like PTE_V as mappages will do that when the page is mapped
+    mappages(p->pagetable, fault_page_addr, PGSIZE, new_physical_addr, page_perms);
+
+    //Read file content of the file in the VMA
+    uint64 vma_offset = fault_page_addr - p->vma_list.addr[valid_vma];  //Multiple of PGSIZE
+    struct file * mapped_file = p->vma_list.file[valid_vma];
+
+    begin_op();               //Begin file system operation (read from a file)
+    ilock(mapped_file->ip);   //Acquire i-node lock
+    readi(mapped_file->ip, 0, new_physical_addr, p->vma_list.offset[valid_vma] + vma_offset, PGSIZE);
+    iunlock(mapped_file->ip); //Release i-node lock
+    end_op();                 //End FS operation
+    
+  } else if ((which_dev = devintr()) != 0){
     // ok
   } else {
     printf("usertrap(): unexpected scause 0x%lx pid=%d\n", r_scause(), p->pid);
@@ -73,6 +133,7 @@ usertrap(void)
     setkilled(p);
   }
 
+finished:
   if(killed(p))
     exit(-1);
 

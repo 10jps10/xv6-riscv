@@ -7,6 +7,7 @@
 #include "defs.h"
 #include "pstat.h"
 
+
 struct cpu cpus[NCPU];
 
 struct proc proc[NPROC];
@@ -20,6 +21,9 @@ struct spinlock pid_lock;
 
 extern void forkret(void);
 static void freeproc(struct proc *p);
+
+extern void vma_free(struct proc *p);
+extern int vma_find(struct vma * vma_list, uint64 addr);
 
 extern char trampoline[]; // trampoline.S
 
@@ -58,6 +62,7 @@ procinit(void)
       initlock(&p->lock, "proc");
       p->state = UNUSED;
       p->kstack = KSTACK((int) (p - proc));
+      p->vma_list.bottom_addr = INITIAL_BOTTOM_ADDR;
   }
 }
 
@@ -257,6 +262,8 @@ userinit(void)
   // Set default initial amount of tickets to proc.
   p->tickets = INITIALTICKETS;
 
+  //TODO CONTINUAR POR AQUI  p->vma_list =
+
   release(&p->lock);
 }
 
@@ -301,6 +308,14 @@ fork(void)
     return -1;
   }
   np->sz = p->sz;
+
+  //Copy parent VMAs to child
+  if (vma_copy(p, np) < 0)
+  {
+    freeproc(np);
+    release(&np->lock);
+    return -1;
+  }
 
   // copy saved user registers.
   *(np->trapframe) = *(p->trapframe);
@@ -368,6 +383,9 @@ exit(int status)
       p->ofile[fd] = 0;
     }
   }
+
+  // Free process' VMAs
+  vma_free(p);
 
   begin_op();
   iput(p->cwd);
