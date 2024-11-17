@@ -113,7 +113,18 @@ vma_free_pages(struct vma * vma_list, int index, uint64 page_addr, int length, p
                 end_op();
             }
         }
-        uvmunmap(pagetable, page_addr + freed, 1, 1);
+        // Our references mechanism is only used when working with pages of VMAs
+        // so we won't bother using it with other pages (in uvmunmap instead of here for example).
+        // (That said, uvmcopypages() is defined at vm.c and uses this mechanism...
+        //  But note that said function was introduced by us and we have only used it to
+        //  copy VMA pages in vma_copy() )
+
+        // Check references to physical addr.
+        int refs = getref((void *)physical_addr);
+        if (refs > 1)
+            decref((void *) physical_addr);
+        // If only one reference left (our process'), we can free physical memory
+        uvmunmap(pagetable, page_addr + freed, 1, (refs == 1));
     }
 
     return freed;
@@ -129,8 +140,28 @@ vma_copy(struct proc * src, struct proc * dst){
         //If VMA is empty we can skip copying it.
         if (src_vma_list->length[i] <= 0) continue;
 
+        // We want src and dst to share their VMA physical pages.
+        // If the VMA is MAP_SHARED there is not much to do.
+        // If the VMA is MAP_PRIVATE then we have to take some additional measures:
+        //      When the VMA does not have PROT_WRITE there is no problem.
+        //      When it does have PROT_WRITE, we need to remove write permissions of the VMA pages
+        //      so that the correspondent write exception will take place at usertrap.
+        //      There we will further handle such events by making a copy of the written pages.
+        // TODO: Pregunta para Ucles ¿Por qué no comprobar si el mapeo tiene PROT_WRITE?
+        // Si no lo tiene nos podemos ahorrar quitar permisos de escritura de las páginas porque
+        // no deberían de estar presentes en primer lugar.
+        if ((src_vma_list->flags[i] == MAP_PRIVATE) && (src_vma_list->prot[i] & PROT_WRITE))
+        {
+            // Remove write permissions to every existing PTE of the VMA
+            for (uint64 page_va = src_vma_list->addr[i]; i < src_vma_list->addr[i] + src_vma_list->length[i]; i+=PGSIZE)
+            {
+                // Filter out empty PTEs
+                if (walkaddr(src->pagetable, page_va))
+                    uvmunsetflags(src->pagetable, page_va, PTE_W);
+            }
+        }
 
-        // Copy user and physical pages from src proc to dst proc.
+        // Copy PTEs associated to given interval of virtual pages from src proc to dst proc.
         if (uvmcopypages(src->pagetable, dst->pagetable, src_vma_list->addr[i], src_vma_list->length[i]) < 0)
             return -1;
 

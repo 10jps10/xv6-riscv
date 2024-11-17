@@ -89,11 +89,14 @@ walk(pagetable_t pagetable, uint64 va, int alloc)
     panic("walk");
 
   for(int level = 2; level > 0; level--) {
+    //*pte = pagetable + ((((uint64) (va)) >> (12+(9*(level)))) & 0x1FF) 
+    // 0x1FF equivalent to 9 bits
     pte_t *pte = &pagetable[PX(level, va)];
     if(*pte & PTE_V) {
       pagetable = (pagetable_t)PTE2PA(*pte);
     } else {
       if(!alloc || (pagetable = (pde_t*)kalloc()) == 0)
+        //There is no VALID pte AND (we are not doing allocation for those OR allocation has failed)
         return 0;
       memset(pagetable, 0, PGSIZE);
       *pte = PA2PTE(pagetable) | PTE_V;
@@ -339,40 +342,72 @@ uvmcopy(pagetable_t old, pagetable_t new, uint64 sz)
   return -1;
 }
 
-// Given a source page table, copy its memory from
-// initial_va to into a destination page table.
-// Copies both the page table and the
-// physical memory.
+// Given a source page table, copy its entries associated to the interval
+// [initial_va,  initial_va + PGROUNDUP(length)] into a destination page table.
+// Does not copy physical memory pointed by those entries.
 // returns 0 on success, -1 on failure.
-// frees any allocated pages on failure.
 int
 uvmcopypages(pagetable_t src, pagetable_t dst, uint64 initial_va, uint64 length)
 {
-  pte_t *pte;
-  uint64 pa, i;
-  uint flags;
-  char *mem;
+  pte_t *pte_src, *pte_dst;
+  uint64 current_va;
 
-  for(i = 0; i < PGROUNDUP(length); i += PGSIZE){
-    if((pte = walk(src, initial_va + i, 0)) == 0)
-      panic("uvmcopypages: pte should exist");
-    if((*pte & PTE_V) == 0)
-      continue; //panic("uvmcopypages: page not present");
-    pa = PTE2PA(*pte);
-    flags = PTE_FLAGS(*pte);
-    if((mem = kalloc()) == 0)
-      goto err;
-    memmove(mem, (char*)pa, PGSIZE);
-    if(mappages(dst, initial_va + i, PGSIZE, (uint64)mem, flags) != 0){
-      kfree(mem);
-      goto err;
-    }
+  
+  for(current_va = initial_va; current_va < initial_va + PGROUNDUP(length); current_va += PGSIZE){
+    //Retrieve pointer to pte in src's pagetable
+    pte_src = walk(src, current_va, 0);
+    if ((pte_src == 0) || (*pte_src == 0))
+      // Since we are not doing allocation in the previous walk():
+      // pte_src == 0 means that there is no valid PTE for current_va in src
+      // Therefore there is nothing to copy. Otherwise we also need to check that
+      // pte_src is actually pointing to a physical page and does not just contain a null value.
+      continue;
+
+    //Retrieve pointer to PTE in dst's pagetable and allocate PTE if it is not
+    pte_dst = walk(dst, current_va, 1);
+    if (pte_dst == 0)
+      // Since we ARE doing allocation in the previous walk():
+      // pte_dst == 0 means that kalloc() in walk has failed.
+      return -1;
+    
+    // Copy PTE contents from src to dst.
+    // This means that src and dst will share the physical page associated to this PTE.
+    *pte_dst = *pte_src;
+
+    // Increase references to said physical page
+    incref((void *) PTE2PA(*pte_src));
   }
   return 0;
+}
 
- err:
-  uvmunmap(dst, initial_va, i / PGSIZE, 1);
-  return -1;
+
+//TODO: Remove this if we do not use it anywhere... (Also remove it from defs)
+// Sets specified flags of the PTE in pagetable associated to the va.
+// Returns 0 on success or -1 if the va does not have an associated PTE.
+int
+uvmsetflags(pagetable_t pagetable, uint64 va, uint64 flags)
+{
+  pte_t * pte;
+
+  pte = walk(pagetable, va, 0);
+  if (pte == 0)
+    return -1;
+  *pte |= flags;
+  return 0;
+}
+
+// Unsets specified flags of the PTE in pagetable associated to the va.
+// Returns 0 on success or -1 if the va does not have an associated PTE.
+int
+uvmunsetflags(pagetable_t pagetable, uint64 va, uint64 flags)
+{
+  pte_t * pte;
+
+  pte = walk(pagetable, va, 0);
+  if (pte == 0)
+    return -1;
+  *pte &= ~flags;
+  return 0;
 }
 
 // mark a PTE invalid for user access.

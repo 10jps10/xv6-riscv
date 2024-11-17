@@ -97,6 +97,48 @@ usertrap(void)
       goto finished;
     }
 
+    // If we are here we know that if the trap was caused by a store, the VMA has write permissions.
+    // If the physical_addr associated to fault_addr is not null (i.e. physical page is already allocated)
+    // then we are here because of a store fault to a page (physical_addr) with 
+    // no PTE_W on its page table entry.
+    // This should be enough to confirm that we are here because of our mechanism
+    // that unset the write permissions of the entry associated to this page
+    // back in vma_copy when the VMA was MAP_PRIVATE...
+    // *but just in case*, we will assert that the VMA is MAP_PRIVATE :)
+    uint64 physical_addr = walkaddr(p->pagetable, fault_addr);
+    if ((physical_addr != 0) && (p->vma_list.flags[valid_vma] == MAP_PRIVATE)) {
+      // pte DOES exist since physical_addr given by walkaddr (which uses walk) was not null
+      pte_t * pte = walk(p->pagetable, fault_addr, 0);
+      
+      if (getref((void *) physical_addr) == 1) {
+        // If it is only our process referencing this physical page, just give it write perms.
+        *pte |= PTE_W;
+        // No need to do anything else.
+        goto finished;
+      }
+
+      // Else, physical_addr has more than one reference:
+      // Get a new physical page
+      uint64 new_physical_addr = (uint64) kalloc();
+      if (new_physical_addr == 0)
+      {
+        // Unable to allocate new physical page
+        setkilled(p);
+        goto finished;
+      }
+      // Copy original page to new page
+      memmove((void *)new_physical_addr, (void *)physical_addr, PGSIZE);
+      // Update pte to point to new_physical_addr with original flags + PTE_W
+      *pte = PA2PTE(new_physical_addr) | PTE_FLAGS(*pte) | PTE_W;
+      // Increment references to new physical page
+      incref((void *)new_physical_addr);
+      // Increment references to original physical page
+      decref((void *)physical_addr);
+
+      // We are done
+      goto finished;
+    }
+
     //Get a new physical page
     uint64 new_physical_addr = (uint64) kalloc();
     if (new_physical_addr == 0)
@@ -113,7 +155,13 @@ usertrap(void)
 
     //Map virtual page to physical page
     int page_perms = PTE_U | PTE_R | (can_write ? PTE_W : 0); //NOTE: No need to set other flags like PTE_V as mappages will do that when the page is mapped
-    mappages(p->pagetable, fault_page_addr, PGSIZE, new_physical_addr, page_perms);
+    if (mappages(p->pagetable, fault_page_addr, PGSIZE, new_physical_addr, page_perms) < 0)
+    {
+      // mappages failed
+      setkilled(p);
+      goto finished;
+    }
+    //TODO: No deberíamos de hacer incref((void *)new_physical_addr); aquí?
 
     //Read file content of the file in the VMA
     uint64 vma_offset = fault_page_addr - p->vma_list.addr[valid_vma];  //Multiple of PGSIZE

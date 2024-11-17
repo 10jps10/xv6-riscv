@@ -12,8 +12,8 @@ struct vma {
   uint64 addr[MAXVMA];
   uint64 length[MAXVMA];
   uint64 offset[MAXVMA];    // File offset (where, in the file, is the start of the region that the vma will cover)
-  int prot[MAXVMA];
-  int flags[MAXVMA];
+  int prot[MAXVMA];         // Protection options (READ, WRITE...)
+  int flags[MAXVMA];        // Map options (SHARED, PRIVATE...)
   int fd[MAXVMA];
   struct file * file[MAXVMA];
   uint64 bottom_addr; // VMAs will be allocated at the end of proc memory. When a vma is allocated, bottom_addr will decrease as much as said vma takes.
