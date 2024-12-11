@@ -5,6 +5,7 @@
 #include "riscv.h"
 #include "defs.h"
 #include "fs.h"
+#include "dtb.h"
 
 /*
  * the kernel's page table.

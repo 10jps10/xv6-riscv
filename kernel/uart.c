@@ -9,9 +9,10 @@
 #include "spinlock.h"
 #include "proc.h"
 #include "defs.h"
+#include "dtb.h"
 
 // the UART control registers are memory-mapped
-// at address UART0. this macro returns the
+// at address uart_base. this macro returns the
 // address of one of the registers.
 #define Reg(reg) ((volatile unsigned char *)(UART0 + (reg)))
 

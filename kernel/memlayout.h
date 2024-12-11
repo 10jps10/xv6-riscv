@@ -1,3 +1,4 @@
+#include "dtb.h"
 // Physical memory layout
 
 // qemu -machine virt is set up like this,
@@ -18,8 +19,8 @@
 // PHYSTOP -- end RAM used by the kernel
 
 // qemu puts UART registers here in physical memory.
-#define UART0 0x10000000L
-#define UART0_IRQ 10
+#define UART0 (uart_base) // 0x10000000L
+#define UART0_IRQ (uart_irq) // 10
 
 // virtio mmio interface
 #define VIRTIO0 0x10001000

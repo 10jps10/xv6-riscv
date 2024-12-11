@@ -11,6 +11,8 @@ _entry:
         # sp = stack0 + (hartid * 4096)
         la sp, stack0
         li a0, 1024*4
+	la t0, dtb_pa       	 # Cargar la dirección de la variable global dtb_pa
+        sd a1, 0(t0)         	 # Guardar dtb_pa = a1
         csrr a1, mhartid
         addi a1, a1, 1
         mul a0, a0, a1
