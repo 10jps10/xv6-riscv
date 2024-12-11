@@ -41,7 +41,7 @@ void            fileinit(void);
 int             fileread(struct file*, uint64, int n);
 int             filestat(struct file*, uint64 addr);
 int             filewrite(struct file*, uint64, int n);
-uint64          mmap(uint64 addr, int offset, int length, int prot, int flags, int fd, struct file * f);
+uint64          mmap(uint64 addr, int force_addr, int offset, int length, int prot, int flags, int fd, struct file * f);
 int             munmap(uint64 addr, int length);
 
 // fs.c
@@ -200,6 +200,7 @@ int             copyinstr(pagetable_t, char *, uint64, uint64);
 int             uvmcopypages(pagetable_t src, pagetable_t dst, uint64 initial_va, uint64 length);
 int             uvmsetflags(pagetable_t pagetable, uint64 va, uint64 flags);
 int             uvmunsetflags(pagetable_t pagetable, uint64 va, uint64 flags);
+int             uvmcompletemap(pagetable_t pagetable, uint64 page_va);
 
 // plic.c
 void            plicinit(void);

@@ -41,6 +41,7 @@ void
 usertrap(void)
 {
   int which_dev = 0;
+  uint64 cause  = r_scause();
 
   if((r_sstatus() & SSTATUS_SPP) != 0)
     panic("usertrap: not from user mode");
@@ -54,7 +55,7 @@ usertrap(void)
   // save user program counter.
   p->trapframe->epc = r_sepc();
   
-  if(r_scause() == 8){
+  if(cause == 8){
     // system call
 
     if(killed(p))
@@ -70,12 +71,10 @@ usertrap(void)
 
     syscall();
   } 
-  else if ((r_scause() == 13) || (r_scause() == 15)) {
-    // 13 Load page fault || 15 Store/AMO page fault
+  else if ((cause == 12) || (cause == 13) || (cause == 15)) {
+    // 12 Instruction page fault || 13 Load page fault || 15 Store/AMO page fault
     uint64 fault_addr = r_stval();
     // Check whether address is within process memory.
-    // Here we are assuming that everything below sz is already mapped.
-    // Therefore the checks that take place in vma_find will suffice.
     if (fault_addr < 0) {
       setkilled(p);
       goto finished;
@@ -89,10 +88,19 @@ usertrap(void)
     }
 
     // If here because a write error, check if we have write permissions
-    int can_write = (p->vma_list.prot[valid_vma] & PROT_WRITE);
-    if ((r_scause() == 15) && !can_write)
+    int can_write = (p->vma_list.prot[valid_vma] & PROT_WRITE) != 0;
+    if ((cause == 15) && !can_write)
     {
       // Attempting to write without permissions
+      setkilled(p);
+      goto finished;
+    }
+
+    // If here because an exec error, check if we have exec permissions
+    int can_exec = (p->vma_list.prot[valid_vma] & PROT_EXEC) != 0;
+    if ((cause == 12) && !can_exec)
+    {
+      // Attempting to exec without permissions
       setkilled(p);
       goto finished;
     }
@@ -154,7 +162,8 @@ usertrap(void)
     uint64 fault_page_addr = PGROUNDDOWN(fault_addr);
 
     //Map virtual page to physical page
-    int page_perms = PTE_U | PTE_R | (can_write ? PTE_W : 0); //NOTE: No need to set other flags like PTE_V as mappages will do that when the page is mapped
+    int page_perms = PTE_U | PTE_R | (can_write == 1 ? PTE_W : 0) | (can_exec == 1 ? PTE_X : 0);
+    //NOTE: No need to set other flags like PTE_V as mappages will do that when the page is mapped
     if (mappages(p->pagetable, fault_page_addr, PGSIZE, new_physical_addr, page_perms) < 0)
     {
       // mappages failed
@@ -163,7 +172,7 @@ usertrap(void)
     }
     //TODO: No deberíamos de hacer incref((void *)new_physical_addr); aquí?
 
-    //Read file content of the file in the VMA
+    //Read content of the file in the VMA
     uint64 vma_offset = fault_page_addr - p->vma_list.addr[valid_vma];  //Multiple of PGSIZE
     struct file * mapped_file = p->vma_list.file[valid_vma];
 
@@ -176,7 +185,7 @@ usertrap(void)
   } else if ((which_dev = devintr()) != 0){
     // ok
   } else {
-    printf("usertrap(): unexpected scause 0x%lx pid=%d\n", r_scause(), p->pid);
+    printf("usertrap(): unexpected scause 0x%lx pid=%d\n", cause, p->pid);
     printf("            sepc=0x%lx stval=0x%lx\n", r_sepc(), r_stval());
     setkilled(p);
   }

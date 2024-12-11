@@ -5,6 +5,9 @@
 #include "riscv.h"
 #include "defs.h"
 #include "fs.h"
+#include "proc.h"
+#include "fcntl.h"
+#include "file.h"
 
 /*
  * the kernel's page table.
@@ -190,7 +193,7 @@ uvmunmap(pagetable_t pagetable, uint64 va, uint64 npages, int do_free)
     if((pte = walk(pagetable, a, 0)) == 0)
       panic("uvmunmap: walk");
     if((*pte & PTE_V) == 0)
-      panic("uvmunmap: not mapped"); //Seguramente esto tendremos que cambiarlo por un continue cuando hagamos nuestra chapuza
+      continue;
     if(PTE_FLAGS(*pte) == PTE_V)
       panic("uvmunmap: not a leaf");
     if(do_free){
@@ -324,7 +327,7 @@ uvmcopy(pagetable_t old, pagetable_t new, uint64 sz)
     if((pte = walk(old, i, 0)) == 0)
       panic("uvmcopy: pte should exist");
     if((*pte & PTE_V) == 0)
-      panic("uvmcopy: page not present");
+      continue;
     pa = PTE2PA(*pte);
     flags = PTE_FLAGS(*pte);
     if((mem = kalloc()) == 0)
@@ -378,6 +381,54 @@ uvmcopypages(pagetable_t src, pagetable_t dst, uint64 initial_va, uint64 length)
     incref((void *) PTE2PA(*pte_src));
   }
   return 0;
+}
+
+// Checks if there is an VMA associated to the address of page_va and attempts to read missing content
+// from the file. Returns 0 on success and -1 on failure.
+int
+uvmcompletemap(pagetable_t pagetable, uint64 page_va) {
+  struct proc *p = myproc();
+  // Get vma index of the vma where the address is pointing into
+  
+    int valid_vma = vma_find(&(p->vma_list), page_va);
+    if (valid_vma < 0) {
+      return -1;
+    }
+
+    int can_write = (p->vma_list.prot[valid_vma] & PROT_WRITE) != 0;
+    int can_exec = (p->vma_list.prot[valid_vma] & PROT_EXEC) != 0;
+
+    //Get a new physical page
+    uint64 new_physical_addr = (uint64) kalloc();
+    if (new_physical_addr == 0)
+    {
+      return -1;
+    }
+    //Physical page might not be clean. Clear it.
+    memset((void *)new_physical_addr, 0, PGSIZE);
+
+    //Get virtual page address
+    uint64 fault_page_addr = PGROUNDDOWN(page_va);
+
+    //Map virtual page to physical page
+    int page_perms = PTE_U | PTE_R | (can_write == 1 ? PTE_W : 0) | (can_exec == 1 ? PTE_X : 0);
+    //NOTE: No need to set other flags like PTE_V as mappages will do that when the page is mapped
+    if (mappages(p->pagetable, fault_page_addr, PGSIZE, new_physical_addr, page_perms) < 0)
+    {
+      return -1;
+    }
+
+    //Read content of the file in the VMA
+    uint64 vma_offset = fault_page_addr - p->vma_list.addr[valid_vma];  //Multiple of PGSIZE
+    struct file * mapped_file = p->vma_list.file[valid_vma];
+
+    begin_op();               //Begin file system operation (read from a file)
+    ilock(mapped_file->ip);   //Acquire i-node lock
+    readi(mapped_file->ip, 0, new_physical_addr, p->vma_list.offset[valid_vma] + vma_offset, PGSIZE);
+    iunlock(mapped_file->ip); //Release i-node lock
+    end_op();                 //End FS operation
+
+    return 0;
 }
 
 
@@ -464,8 +515,12 @@ copyin(pagetable_t pagetable, char *dst, uint64 srcva, uint64 len)
   while(len > 0){
     va0 = PGROUNDDOWN(srcva);
     pa0 = walkaddr(pagetable, va0);
-    if(pa0 == 0)
-      return -1;
+    if(pa0 == 0) {
+      // Check if there is a map for this address and try to complete it.
+      if (uvmcompletemap(pagetable, srcva) < 0)
+        // No map for this address
+        return -1;
+    }
     n = PGSIZE - (srcva - va0);
     if(n > len)
       n = len;

@@ -6,8 +6,10 @@
 #include "proc.h"
 #include "defs.h"
 #include "elf.h"
+#include "fcntl.h"
+#include "file.h"
 
-static int loadseg(pde_t *, uint64, struct inode *, uint, uint);
+//static int loadseg(pde_t *, uint64, struct inode *, uint, uint);
 
 int flags2perm(int flags)
 {
@@ -31,6 +33,9 @@ exec(char *path, char **argv)
   pagetable_t pagetable = 0, oldpagetable;
   struct proc *p = myproc();
 
+  //Clean the vma list
+  vma_free(p);
+
   begin_op();
 
   if((ip = namei(path)) == 0){
@@ -49,6 +54,15 @@ exec(char *path, char **argv)
   if((pagetable = proc_pagetable(p)) == 0)
     goto bad;
 
+  struct file * phfile = filealloc();
+  phfile->ref = 1;
+  phfile->type = FD_INODE;
+  phfile->readable = 1;
+  phfile->writable = 0;
+  phfile->ip = ip;
+  phfile->off = 0; // TODO: 0 o nos saltamos el elf???
+  idup(ip);
+
   // Load program into memory.
   for(i=0, off=elf.phoff; i<elf.phnum; i++, off+=sizeof(ph)){
     if(readi(ip, 0, (uint64)&ph, off, sizeof(ph)) != sizeof(ph))
@@ -61,13 +75,23 @@ exec(char *path, char **argv)
       goto bad;
     if(ph.vaddr % PGSIZE != 0)
       goto bad;
-    uint64 sz1;
-    if((sz1 = uvmalloc(pagetable, sz, ph.vaddr + ph.memsz, flags2perm(ph.flags))) == 0)
-      goto bad;
-    sz = sz1;
-    if(loadseg(pagetable, ph.vaddr, ip, ph.off, ph.filesz) < 0)
-      goto bad;
+    //uint64 sz1;
+    // Increase proc size
+    sz = ph.vaddr + ph.memsz;
+    // Use VMAs instead of loading program segment into memory.
+    int perms = flags2perm(ph.flags);
+    int vma_prot = ((perms & PTE_R) != 0 ? PROT_READ : 0) | ((perms & PTE_W) != 0 ? PROT_WRITE : 0) | ((perms & PTE_X) != 0 ? PROT_EXEC : 0);
+    if (mmap(ph.vaddr, 1, ph.off, ph.memsz, vma_prot, MAP_PRIVATE, 0, phfile) != ph.vaddr)
+      goto bad; //TODO: CACA. Mirar si en el bad hay que hacer algo...
+
+    // Original implementation without VMAs
+    // if((sz1 = uvmalloc(pagetable, sz, ph.vaddr + ph.memsz, flags2perm(ph.flags))) == 0)
+    //   goto bad;
+    // sz = sz1;
+    // if(loadseg(pagetable, ph.vaddr, ip, ph.off, ph.filesz) < 0)
+    //   goto bad;
   }
+  fileclose(phfile);
   iunlockput(ip);
   end_op();
   ip = 0;
@@ -131,6 +155,7 @@ exec(char *path, char **argv)
   return argc; // this ends up in a0, the first argument to main(argc, argv)
 
  bad:
+ //fileclose(phfile);
   if(pagetable)
     proc_freepagetable(pagetable, sz);
   if(ip){
@@ -144,23 +169,23 @@ exec(char *path, char **argv)
 // va must be page-aligned
 // and the pages from va to va+sz must already be mapped.
 // Returns 0 on success, -1 on failure.
-static int
-loadseg(pagetable_t pagetable, uint64 va, struct inode *ip, uint offset, uint sz)
-{
-  uint i, n;
-  uint64 pa;
+// static int
+// loadseg(pagetable_t pagetable, uint64 va, struct inode *ip, uint offset, uint sz)
+// {
+//   uint i, n;
+//   uint64 pa;
 
-  for(i = 0; i < sz; i += PGSIZE){
-    pa = walkaddr(pagetable, va + i);
-    if(pa == 0)
-      panic("loadseg: address should exist");
-    if(sz - i < PGSIZE)
-      n = sz - i;
-    else
-      n = PGSIZE;
-    if(readi(ip, 0, (uint64)pa, offset+i, n) != n)
-      return -1;
-  }
+//   for(i = 0; i < sz; i += PGSIZE){
+//     pa = walkaddr(pagetable, va + i);
+//     if(pa == 0)
+//       panic("loadseg: address should exist");
+//     if(sz - i < PGSIZE)
+//       n = sz - i;
+//     else
+//       n = PGSIZE;
+//     if(readi(ip, 0, (uint64)pa, offset+i, n) != n)
+//       return -1;
+//   }
   
-  return 0;
-}
+//   return 0;
+// }

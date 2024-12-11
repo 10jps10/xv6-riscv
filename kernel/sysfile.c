@@ -542,7 +542,7 @@ sys_mmap(void)
       return -1;
   }
 
-  return mmap(addr, offset, length, prot, flags, fd, f);
+  return mmap(addr, 0, offset, length, prot, flags, fd, f);
 }
 
 uint64

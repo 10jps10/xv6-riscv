@@ -1,4 +1,8 @@
+#ifndef _PROC_H_
+#define _PROC_H_
+
 #include "vma.h"
+#include "spinlock.h"
 
 // Saved registers for kernel context switches.
 struct context {
@@ -110,3 +114,5 @@ struct proc {
   uint64 ticks;                // Process ticks (cpu quantums granted to proc by scheduler)
   struct vma vma_list;         // Process Virtual Memory Areas
 };
+
+#endif //_PROC_H_

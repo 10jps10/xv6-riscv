@@ -181,7 +181,7 @@ filewrite(struct file *f, uint64 addr, int n)
 }
 
 uint64
-mmap(uint64 addr, int offset, int length, int prot, int flags, int fd, struct file * f)
+mmap(uint64 addr, int force_addr, int offset, int length, int prot, int flags, int fd, struct file * f)
 {
   struct proc * p = myproc();
   // Find a free entry in process vma list
@@ -189,7 +189,7 @@ mmap(uint64 addr, int offset, int length, int prot, int flags, int fd, struct fi
   if (index < 0)
     return -1; // There are no free vma entries left
 
-  if (addr == 0)
+  if (!force_addr)
   {
     //Undefined virtual address. Kernel will decide.
     addr = vma_get_new_addr(&(p->vma_list), length);

@@ -33,7 +33,7 @@ vma_find(struct vma * vma_list, uint64 addr) {
     for (int i = 0; i < MAXVMA; i++)
     {
         uint64 vma_addr = vma_list->addr[i];
-        uint64 vma_length = vma_list->addr[i];
+        uint64 vma_length = vma_list->length[i];
         if ((vma_addr <= addr) && (addr < vma_addr + vma_length))
             return i;
     }
@@ -66,7 +66,8 @@ vma_fill(struct vma * vma_list, int index, uint64 addr, int offset, int length, 
     return 0;
 }
 
-//Allocate space for new vma given its length and return virtual address
+//Allocate space for new vma given its length and return virtual address.
+//Length does not need to be page-aligned.
 uint64
 vma_get_new_addr(struct vma * vma_list, uint64 length)
 {
@@ -147,7 +148,7 @@ vma_copy(struct proc * src, struct proc * dst){
         //      When it does have PROT_WRITE, we need to remove write permissions of the VMA pages
         //      so that the correspondent write exception will take place at usertrap.
         //      There we will further handle such events by making a copy of the written pages.
-        // TODO: Pregunta para Ucles ¿Por qué no comprobar si el mapeo tiene PROT_WRITE?
+        // TODO: Pregunta ¿Por qué no comprobar si el mapeo tiene PROT_WRITE?
         // Si no lo tiene nos podemos ahorrar quitar permisos de escritura de las páginas porque
         // no deberían de estar presentes en primer lugar.
         if ((src_vma_list->flags[i] == MAP_PRIVATE) && (src_vma_list->prot[i] & PROT_WRITE))
